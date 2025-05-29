@@ -1,0 +1,11 @@
+boto3
+matplotlib
+networkx
+numpy
+pandas
+plotly
+prettyprinter
+scikit_learn
+seaborn
+streamlit
+tabulate
