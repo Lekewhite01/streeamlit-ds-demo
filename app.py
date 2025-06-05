@@ -13,14 +13,8 @@ from fraud_utils import (
     kmeans_clustering, isolation_forest_anomaly, lof_anomaly,
     create_risk_score, generate_explanatory_report, analyze_high_risk_patterns
 )
-
-# # Configure page
-# st.set_page_config(
-#     page_title="Fraud Detection System",
-#     page_icon="🕵️",
-#     layout="wide",
-#     initial_sidebar_state="expanded"
-# )
+from onboarding import (ClusterProfiler, InsightPromptBuilder,  DemographicRiskAssessor, 
+                        demo_features, query_gpt_for_insights, query_claude_for_insights)
 
 # Configure Streamlit page
 st.set_page_config(
@@ -52,7 +46,7 @@ def get_aws_client(service_name):
 # Page selection in sidebar
 page = st.sidebar.selectbox(
     "Select Analysis Mode",
-    ["Transaction Clustering", "Real-time Screening", "About"]
+    ["Transaction Clustering", "Real-time Screening", "Onboarding risk", "About"]
 )
 
 if page == "Transaction Clustering":
@@ -163,19 +157,6 @@ if page == "Transaction Clustering":
                 with redirect_stdout(f):
                     generate_explanatory_report(df)
                 report_placeholder.text(f.getvalue())
-
-            # In your Streamlit analysis section:
-            # with st.expander("High-Risk Pattern Analysis"):
-                # # Get the report and figures
-                # report_text, report_figures = analyze_high_risk_patterns(df)
-                
-                # # Display the text report
-                # st.text(report_text)
-                
-                # # Display each figure
-                # if report_figures:
-                #     for fig in report_figures:
-                #         st.pyplot(fig)
             
             # Download results
             st.header("5. Download Results")
@@ -260,6 +241,84 @@ elif page == "Real-time Screening":
             if "cluster_id" in result:
                 st.subheader("Transaction Cluster Profile")
                 st.json(result["cluster_profiles"])
+
+elif page == "Onboarding risk":
+    st.write("Upload your clustered dataset and analyze a specific cluster using AI.")
+
+    with st.sidebar:
+        st.subheader("Upload CSV")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+
+    if uploaded_file:
+        reference_df = pd.read_csv(uploaded_file)
+        st.success("CSV uploaded successfully!")
+
+        with st.form("new_user_form"):
+            st.subheader("New User Profile")
+            gender = st.selectbox("Gender", ["Male", "Female"])
+            nationality = st.text_input("Nationality", "Nigerian")
+            state_of_origin = st.text_input("State of Origin", "Lagos")
+            lga_of_origin = st.text_input("LGA of Origin", "Ikeja")
+            state_of_residence = st.text_input("State of Residence", "Lagos")
+            lga_of_residence = st.text_input("LGA of Residence", "Eti-Osa")
+            occupation = st.text_input("Occupation", "Trader")
+            experience = st.selectbox("Experience", ["individual", "signature"])
+            tier = st.selectbox("Tier", ["Tier 1", "Tier 2", "Tier 3"])
+            submit_button = st.form_submit_button("Analyze")
+
+        if submit_button:
+            new_user = {
+                'bvnData.gender': gender,
+                'bvnData.nationality': nationality,
+                'bvnData.state_of_origin': state_of_origin,
+                'bvnData.lga_of_origin': lga_of_origin,
+                'bvnData.state_of_residence': state_of_residence,
+                'bvnData.lga_of_residence': lga_of_residence,
+                'occupation': occupation,
+                'experience': experience,
+                'tier': tier
+            }
+
+            assessor = DemographicRiskAssessor(reference_df, demo_features)
+            best_cluster, jsd_score = assessor.assess_new_user(new_user)
+            cluster_risk = reference_df[reference_df['cluster'] == best_cluster]['cluster_risk'].mean()
+            st.info(
+                f"**Closest Cluster**: {best_cluster}\n"
+                f"**Jensen-Shannon Score**: {jsd_score:.4f}\n"
+                f"**Estimated Cluster Risk**: {cluster_risk:.4f}"
+            )
+
+            st.session_state["best_cluster"] = best_cluster
+
+        # Streamlit form
+        with st.form("cluster_form"):
+            # cluster_id = st.number_input("Enter Cluster ID to Analyze", placeholder=st.session_state.get("best_cluster", None), min_value=0, step=1)
+            cluster_id = st.text_input("Enter Cluster ID to Analyze", placeholder=st.session_state.get("best_cluster", None))
+            submit_button_ai = st.form_submit_button("Generate Insight")
+
+        if submit_button_ai:
+            try:
+                # Extract cluster profile and generate AI explanation
+                profiler = ClusterProfiler(reference_df)
+                cluster_profile = profiler.extract_cluster_profile(cluster_id=st.session_state.get("best_cluster", None))
+
+                prompt = InsightPromptBuilder.build_prompt(cluster_profile)
+                # insight_report = query_gpt_for_insights(prompt)
+                insight_report = query_claude_for_insights(prompt)
+
+                st.subheader("AI Narrative")
+                st.write(insight_report.narrative)
+
+                st.subheader("AI Insights")
+                for insight in insight_report.insights:
+                    st.markdown(f"**{insight.category} Insight: {insight.summary}**")
+                    st.markdown(insight.detail)
+                    st.markdown("_Metrics: " + ", ".join(insight.metric_examples) + "_")
+
+            except Exception as e:
+                st.error(f"Error generating insight: {e}")
+    else:
+        st.info("Please upload a CSV file to get started.")
 
 elif page == "About":
     st.title("About This Application")
