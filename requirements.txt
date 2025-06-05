@@ -11,3 +11,4 @@ streamlit
 tabulate
 openai
 anthropic
+python-dotenv
